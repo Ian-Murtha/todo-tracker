@@ -1,0 +1,181 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f7f7fa;
+  color: #1a1a1a;
+}
+
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 260px;
+  background: #fff;
+  border-right: 1px solid #e2e2e6;
+  padding: 20px;
+}
+
+.sidebar h2 {
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #888;
+  margin-bottom: 12px;
+}
+
+.new-list-row,
+.new-entry-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.new-list-row input,
+.new-entry-row input {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: #4a5cf0;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+button:hover {
+  background: #3947c9;
+}
+
+.list-nav {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.list-nav li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.list-nav li:hover {
+  background: #f0f0f5;
+}
+
+.list-nav li.active {
+  background: #e7e9fd;
+  font-weight: 600;
+}
+
+.list-title {
+  flex: 1;
+}
+
+.list-actions button {
+  background: none;
+  padding: 2px 4px;
+  font-size: 13px;
+}
+
+.list-actions button:hover {
+  background: #dcdcf0;
+}
+
+.main-content {
+  flex: 1;
+  padding: 30px 40px;
+}
+
+.list-view h1 {
+  margin-bottom: 4px;
+}
+
+.subtitle {
+  color: #888;
+  margin-top: 0;
+  margin-bottom: 20px;
+}
+
+.entries {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 600px;
+}
+
+.entry-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  border: 1px solid #e2e2e6;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.drag-handle {
+  cursor: grab;
+  color: #aaa;
+  font-size: 16px;
+  user-select: none;
+}
+
+.entry-text {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 15px;
+  background: transparent;
+}
+
+.entry-text.done {
+  text-decoration: line-through;
+  color: #999;
+}
+
+.delete-btn {
+  background: none;
+  color: #bbb;
+  font-size: 14px;
+  padding: 4px 6px;
+}
+
+.delete-btn:hover {
+  background: #fde2e2;
+  color: #d33;
+}
+
+.center-message {
+  color: #888;
+  font-size: 16px;
+  padding: 40px;
+}
+
+.error-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #ffe0e0;
+  color: #a00;
+  padding: 10px;
+  text-align: center;
+  cursor: pointer;
+  z-index: 10;
+}
