@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from './supabaseClient'
 import ListSidebar from './components/ListSidebar'
 import ListView from './components/ListView'
+import { toggleWithCascade, moveEntry as moveEntryInTree, filterOutSubtree, type DropZone } from './entryTree'
 import type { Entry, TodoList } from './types'
 
 export default function App() {
@@ -83,12 +84,17 @@ export default function App() {
     }
   }
 
-  const addEntry = async (content: string) => {
+  const addEntry = async (content: string, parentId: string | null = null) => {
     if (!selectedListId) return
-    const position = entries.length
+    const siblingCount = entries.filter((e) => e.parent_entry_id === parentId).length
     const { data, error } = await supabase
       .from('entries')
-      .insert({ list_id: selectedListId, content, position })
+      .insert({
+        list_id: selectedListId,
+        parent_entry_id: parentId,
+        content,
+        position: siblingCount,
+      })
       .select()
       .single()
 
@@ -96,10 +102,10 @@ export default function App() {
     if (data) setEntries((prev) => [...prev, data])
   }
 
-  const toggleEntry = async (id: string, done: boolean) => {
-    const { error } = await supabase.from('entries').update({ done }).eq('id', id)
-    if (error) return setError(error.message)
-    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, done } : e)))
+  const toggleEntry = (id: string, done: boolean) => {
+    const { entries: updated, changedIds } = toggleWithCascade(entries, id, done)
+    setEntries(updated)
+    persistChanges(updated, changedIds, ['done'])
   }
 
   const editEntry = async (id: string, content: string) => {
@@ -112,19 +118,43 @@ export default function App() {
   }
 
   const deleteEntry = async (id: string) => {
+    // The DB cascades deletes to descendants (parent_entry_id references
+    // entries.id on delete cascade), so we only need to delete this row.
     const { error } = await supabase.from('entries').delete().eq('id', id)
     if (error) return setError(error.message)
-    setEntries((prev) => prev.filter((e) => e.id !== id))
+    setEntries((prev) => filterOutSubtree(prev, id))
   }
 
-  const reorderEntries = async (newOrder: Entry[]) => {
-    // Optimistic UI update
-    setEntries(newOrder)
+  const toggleCollapsed = async (id: string, collapsed: boolean) => {
+    const { error } = await supabase
+      .from('entries')
+      .update({ collapsed })
+      .eq('id', id)
+    if (error) return setError(error.message)
+    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, collapsed } : e)))
+  }
 
-    // Persist new positions
-    const updates = newOrder.map((entry, index) =>
-      supabase.from('entries').update({ position: index }).eq('id', entry.id)
-    )
+  const moveEntry = (draggedId: string, overId: string, zone: DropZone) => {
+    const result = moveEntryInTree(entries, draggedId, overId, zone)
+    if (!result) return // invalid move (e.g. would create a cycle)
+    setEntries(result.entries)
+    persistChanges(result.entries, result.changedIds, ['parent_entry_id', 'position', 'collapsed'])
+  }
+
+  /** Persist only the fields that changed for the given entry ids. */
+  const persistChanges = async (
+    updated: Entry[],
+    changedIds: string[],
+    fields: (keyof Entry)[]
+  ) => {
+    if (changedIds.length === 0) return
+    const byId = new Map(updated.map((e) => [e.id, e]))
+    const updates = changedIds.map((id) => {
+      const entry = byId.get(id)!
+      const patch: Record<string, unknown> = {}
+      for (const field of fields) patch[field] = entry[field]
+      return supabase.from('entries').update(patch).eq('id', id)
+    })
     const results = await Promise.all(updates)
     const failed = results.find((r) => r.error)
     if (failed?.error) setError(failed.error.message)
@@ -158,7 +188,8 @@ export default function App() {
             onToggleEntry={toggleEntry}
             onEditEntry={editEntry}
             onDeleteEntry={deleteEntry}
-            onReorder={reorderEntries}
+            onToggleCollapsed={toggleCollapsed}
+            onMoveEntry={moveEntry}
           />
         ) : (
           <div className="center-message">

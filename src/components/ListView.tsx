@@ -1,28 +1,26 @@
 import { useState } from 'react'
 import {
   DndContext,
-  closestCenter,
   PointerSensor,
   useSensor,
   useSensors,
   DragEndEvent,
+  DragMoveEvent,
+  DragStartEvent,
 } from '@dnd-kit/core'
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  arrayMove,
-} from '@dnd-kit/sortable'
-import SortableEntry from './SortableEntry'
+import EntryRow from './EntryRow'
+import { flattenTree, computeDropZone, type DropZone } from '../entryTree'
 import type { Entry, TodoList } from '../types'
 
 interface Props {
   list: TodoList
   entries: Entry[]
-  onAddEntry: (content: string) => void
+  onAddEntry: (content: string, parentId?: string | null) => void
   onToggleEntry: (id: string, done: boolean) => void
   onEditEntry: (id: string, content: string) => void
   onDeleteEntry: (id: string) => void
-  onReorder: (newOrder: Entry[]) => void
+  onToggleCollapsed: (id: string, collapsed: boolean) => void
+  onMoveEntry: (draggedId: string, overId: string, zone: DropZone) => void
 }
 
 export default function ListView({
@@ -32,9 +30,12 @@ export default function ListView({
   onToggleEntry,
   onEditEntry,
   onDeleteEntry,
-  onReorder,
+  onToggleCollapsed,
+  onMoveEntry,
 }: Props) {
   const [newEntry, setNewEntry] = useState('')
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [overState, setOverState] = useState<{ id: string; zone: DropZone } | null>(null)
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -45,27 +46,50 @@ export default function ListView({
   const handleAdd = () => {
     const trimmed = newEntry.trim()
     if (!trimmed) return
-    onAddEntry(trimmed)
+    onAddEntry(trimmed, null)
     setNewEntry('')
+  }
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(String(event.active.id))
+  }
+
+  const handleDragMove = (event: DragMoveEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) {
+      setOverState(null)
+      return
+    }
+    const activeRect = active.rect.current.translated
+    const overRect = over.rect
+    if (!activeRect || !overRect) return
+    const zone = computeDropZone(activeRect, overRect)
+    setOverState({ id: String(over.id), zone })
   }
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
+    setActiveId(null)
+    setOverState(null)
     if (!over || active.id === over.id) return
 
-    const oldIndex = entries.findIndex((e) => e.id === active.id)
-    const newIndex = entries.findIndex((e) => e.id === over.id)
-    const reordered = arrayMove(entries, oldIndex, newIndex)
-    onReorder(reordered)
+    const activeRect = active.rect.current.translated
+    const overRect = over.rect
+    if (!activeRect || !overRect) return
+
+    const zone = computeDropZone(activeRect, overRect)
+    onMoveEntry(String(active.id), String(over.id), zone)
   }
 
+  const flat = flattenTree(entries)
+  const totalCount = entries.length
   const remaining = entries.filter((e) => !e.done).length
 
   return (
     <div className="list-view">
       <h1>{list.title}</h1>
       <p className="subtitle">
-        {remaining} of {entries.length} remaining
+        {remaining} of {totalCount} remaining
       </p>
 
       <div className="new-entry-row">
@@ -80,25 +104,31 @@ export default function ListView({
 
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
       >
-        <SortableContext
-          items={entries.map((e) => e.id)}
-          strategy={verticalListSortingStrategy}
-        >
-          <div className="entries">
-            {entries.map((entry) => (
-              <SortableEntry
-                key={entry.id}
-                entry={entry}
-                onToggle={onToggleEntry}
-                onEdit={onEditEntry}
-                onDelete={onDeleteEntry}
-              />
-            ))}
-          </div>
-        </SortableContext>
+        <div className="entries">
+          {flat.map((entry) => (
+            <EntryRow
+              key={entry.id}
+              entry={entry}
+              onToggle={onToggleEntry}
+              onEdit={onEditEntry}
+              onDelete={onDeleteEntry}
+              onToggleCollapsed={onToggleCollapsed}
+              onAddChild={(parentId) => {
+                const content = window.prompt('Sub-item text')
+                if (content && content.trim()) onAddEntry(content.trim(), parentId)
+              }}
+              activeDropZone={overState?.id === entry.id ? overState.zone : null}
+              isDropTarget={activeId !== null && overState?.id === entry.id}
+            />
+          ))}
+          {flat.length === 0 && (
+            <p className="empty-message">No entries yet — add one above.</p>
+          )}
+        </div>
       </DndContext>
     </div>
   )
