@@ -1,4 +1,7 @@
 import type { Entry, FlatEntry } from './types'
+import { computeDropZone, type DropZone } from './tree'
+
+export { computeDropZone, type DropZone }
 
 /** Group entries by their parent_entry_id (null = top-level). */
 export function buildChildrenMap(entries: Entry[]): Map<string | null, Entry[]> {
@@ -66,6 +69,13 @@ export function getAncestorIds(entries: Entry[], id: string): string[] {
   return result
 }
 
+/** Remove an entry and all of its descendants from a flat entries array. */
+export function filterOutSubtree(entries: Entry[], id: string): Entry[] {
+  const toRemove = getDescendantIds(entries, id)
+  toRemove.add(id)
+  return entries.filter((e) => !toRemove.has(e.id))
+}
+
 /**
  * Toggle an entry's done state, cascading down to all descendants and
  * propagating auto-check/uncheck upward through ancestor folders.
@@ -111,27 +121,6 @@ export function toggleWithCascade(
   }
 }
 
-/** Remove an entry and all of its descendants from a flat entries array. */
-export function filterOutSubtree(entries: Entry[], id: string): Entry[] {
-  const toRemove = getDescendantIds(entries, id)
-  toRemove.add(id)
-  return entries.filter((e) => !toRemove.has(e.id))
-}
-
-export type DropZone = 'before' | 'after' | 'nest'
-
-/**
- * Compute the drop zone (before / after / nest) based on where the
- * dragged item's center lands within the hovered row's bounding box.
- */
-export function computeDropZone(activeRect: { top: number; height: number }, overRect: { top: number; height: number }): DropZone {
-  const activeCenterY = activeRect.top + activeRect.height / 2
-  const relative = (activeCenterY - overRect.top) / overRect.height
-  if (relative < 0.25) return 'before'
-  if (relative > 0.75) return 'after'
-  return 'nest'
-}
-
 /**
  * Move `draggedId` relative to `overId` according to the drop zone.
  * Handles reparenting, sibling reordering, position renumbering, and
@@ -162,7 +151,6 @@ export function moveEntry(
 
   const oldParentId = dragged.parent_entry_id
 
-  // Siblings of the destination, excluding the dragged entry itself
   const destSiblings = entries
     .filter((e) => e.parent_entry_id === newParentId && e.id !== draggedId)
     .sort((a, b) => a.position - b.position)
@@ -176,7 +164,6 @@ export function moveEntry(
   }
   destSiblings.splice(insertIndex, 0, dragged)
 
-  // Renumber destination siblings and apply new parent to the dragged entry
   destSiblings.forEach((sibling, index) => {
     const entry = byId.get(sibling.id)!
     if (entry.position !== index) {
@@ -189,7 +176,6 @@ export function moveEntry(
     }
   })
 
-  // If it moved to a different parent, renumber the old sibling group too
   if (oldParentId !== newParentId) {
     const oldSiblings = entries
       .filter((e) => e.parent_entry_id === oldParentId && e.id !== draggedId)
@@ -203,7 +189,6 @@ export function moveEntry(
     })
   }
 
-  // Auto-expand the folder something was nested into
   if (zone === 'nest') {
     const target = byId.get(over.id)!
     if (target.collapsed) {

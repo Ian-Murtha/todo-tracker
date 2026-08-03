@@ -1,63 +1,123 @@
 import { useEffect, useState } from 'react'
+import type { Session } from '@supabase/supabase-js'
 import { supabase } from './supabaseClient'
+import AuthGate from './components/AuthGate'
 import ListSidebar from './components/ListSidebar'
 import ListView from './components/ListView'
-import { toggleWithCascade, moveEntry as moveEntryInTree, filterOutSubtree, type DropZone } from './entryTree'
-import type { Entry, TodoList } from './types'
+import {
+  toggleWithCascade,
+  moveEntry as moveEntryInTree,
+  filterOutSubtree as filterOutEntrySubtree,
+} from './entryTree'
+import {
+  moveList as moveListInTree,
+  filterOutSubtree as filterOutListSubtree,
+  getDescendantIds as getListDescendantIds,
+  type DropZone,
+} from './listTree'
+import { isResetDue, performReset } from './resetEngine'
+import type { Entry, EntryCompletion, TodoList } from './types'
 
 export default function App() {
+  return <AuthGate>{(session) => <Dashboard session={session} />}</AuthGate>
+}
+
+function Dashboard({ session }: { session: Session }) {
   const [lists, setLists] = useState<TodoList[]>([])
   const [entries, setEntries] = useState<Entry[]>([])
+  const [completions, setCompletions] = useState<EntryCompletion[]>([])
   const [selectedListId, setSelectedListId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Load all lists on mount
+  // Load everything on mount, running any due resets along the way.
   useEffect(() => {
-    const loadLists = async () => {
-      const { data, error } = await supabase
-        .from('lists')
-        .select('*')
-        .order('position', { ascending: true })
+    const loadAll = async () => {
+      const [listsRes, entriesRes] = await Promise.all([
+        supabase.from('lists').select('*').order('position', { ascending: true }),
+        supabase.from('entries').select('*').order('position', { ascending: true }),
+      ])
+      if (listsRes.error) setError(listsRes.error.message)
+      if (entriesRes.error) setError(entriesRes.error.message)
 
-      if (error) {
-        setError(error.message)
-      } else if (data) {
-        setLists(data)
-        if (data.length > 0) setSelectedListId(data[0].id)
+      let currentLists: TodoList[] = listsRes.data ?? []
+      let currentEntries: Entry[] = entriesRes.data ?? []
+
+      const now = new Date()
+      const dueLists = currentLists.filter((l) => isResetDue(l, now))
+
+      if (dueLists.length > 0) {
+        const listUpdates: TodoList[] = []
+        const completionInserts: { entry_id: string; done: boolean; recorded_at: string }[] = []
+
+        for (const list of dueLists) {
+          const result = performReset(list, currentEntries, now)
+          currentEntries = result.updatedEntries
+          listUpdates.push(result.updatedList)
+          completionInserts.push(...result.completions)
+        }
+        currentLists = currentLists.map(
+          (l) => listUpdates.find((u) => u.id === l.id) ?? l
+        )
+
+        await Promise.all(
+          listUpdates.map((l) =>
+            supabase.from('lists').update({ last_reset_at: l.last_reset_at }).eq('id', l.id)
+          )
+        )
+        const clearedEntryIds = new Set(completionInserts.map((c) => c.entry_id))
+        await Promise.all(
+          Array.from(clearedEntryIds).map((id) =>
+            supabase.from('entries').update({ done: false }).eq('id', id)
+          )
+        )
+        if (completionInserts.length > 0) {
+          const { error } = await supabase.from('entry_completions').insert(completionInserts)
+          if (error) setError(error.message)
+        }
+      }
+
+      setLists(currentLists)
+      setEntries(currentEntries)
+      if (currentLists.length > 0) {
+        const firstTopLevel = currentLists.find((l) => !l.parent_list_id) ?? currentLists[0]
+        setSelectedListId(firstTopLevel.id)
       }
       setLoading(false)
     }
-    loadLists()
+    loadAll()
   }, [])
 
-  // Load entries whenever the selected list changes
+  // Load completion history whenever the selected recurring list changes.
   useEffect(() => {
-    if (!selectedListId) {
-      setEntries([])
+    const list = lists.find((l) => l.id === selectedListId)
+    if (!list || list.list_type !== 'recurring') {
+      setCompletions([])
       return
     }
-    const loadEntries = async () => {
-      const { data, error } = await supabase
-        .from('entries')
-        .select('*')
-        .eq('list_id', selectedListId)
-        .order('position', { ascending: true })
-
-      if (error) {
-        setError(error.message)
-      } else if (data) {
-        setEntries(data)
-      }
+    const entryIds = entries.filter((e) => e.list_id === selectedListId).map((e) => e.id)
+    if (entryIds.length === 0) {
+      setCompletions([])
+      return
     }
-    loadEntries()
-  }, [selectedListId])
+    supabase
+      .from('entry_completions')
+      .select('*')
+      .in('entry_id', entryIds)
+      .order('recorded_at', { ascending: true })
+      .then(({ data, error }) => {
+        if (error) setError(error.message)
+        else setCompletions(data ?? [])
+      })
+  }, [selectedListId, lists, entries])
 
-  const createList = async (title: string) => {
-    const position = lists.length
+  // --- Lists ---------------------------------------------------------
+
+  const createList = async (title: string, parentId: string | null = null) => {
+    const siblingCount = lists.filter((l) => l.parent_list_id === parentId).length
     const { data, error } = await supabase
       .from('lists')
-      .insert({ title, position })
+      .insert({ title, parent_list_id: parentId, position: siblingCount })
       .select()
       .single()
 
@@ -75,18 +135,98 @@ export default function App() {
   }
 
   const deleteList = async (id: string) => {
+    const removedIds = getListDescendantIds(lists, id)
+    removedIds.add(id)
+
     const { error } = await supabase.from('lists').delete().eq('id', id)
     if (error) return setError(error.message)
-    setLists((prev) => prev.filter((l) => l.id !== id))
-    if (selectedListId === id) {
-      const remaining = lists.filter((l) => l.id !== id)
-      setSelectedListId(remaining.length > 0 ? remaining[0].id : null)
+
+    setLists((prev) => filterOutListSubtree(prev, id))
+    setEntries((prev) => prev.filter((e) => !removedIds.has(e.list_id)))
+
+    if (selectedListId && removedIds.has(selectedListId)) {
+      const remaining = lists.filter((l) => !removedIds.has(l.id))
+      setSelectedListId(remaining[0]?.id ?? null)
     }
   }
 
+  const toggleListCollapsed = async (id: string, collapsed: boolean) => {
+    const { error } = await supabase.from('lists').update({ collapsed }).eq('id', id)
+    if (error) return setError(error.message)
+    setLists((prev) => prev.map((l) => (l.id === id ? { ...l, collapsed } : l)))
+  }
+
+  const moveList = (draggedId: string, overId: string, zone: DropZone) => {
+    const result = moveListInTree(lists, draggedId, overId, zone)
+    if (!result) return
+    setLists(result.lists)
+    persistListChanges(result.lists, result.changedIds, [
+      'parent_list_id',
+      'position',
+      'collapsed',
+    ])
+  }
+
+  const updateListSettings = async (id: string, patch: Partial<TodoList>) => {
+    const { error } = await supabase.from('lists').update(patch).eq('id', id)
+    if (error) return setError(error.message)
+    setLists((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+  }
+
+  const manualReset = async (list: TodoList) => {
+    const now = new Date()
+    const result = performReset(list, entries, now)
+
+    setLists((prev) => prev.map((l) => (l.id === list.id ? result.updatedList : l)))
+    setEntries(result.updatedEntries)
+
+    const { error: listErr } = await supabase
+      .from('lists')
+      .update({ last_reset_at: result.updatedList.last_reset_at })
+      .eq('id', list.id)
+    if (listErr) setError(listErr.message)
+
+    const clearedIds = result.completions.map((c) => c.entry_id)
+    await Promise.all(
+      clearedIds.map((id) => supabase.from('entries').update({ done: false }).eq('id', id))
+    )
+
+    if (result.completions.length > 0) {
+      const { data, error } = await supabase
+        .from('entry_completions')
+        .insert(result.completions)
+        .select()
+      if (error) setError(error.message)
+      else if (data) setCompletions((prev) => [...prev, ...data])
+    }
+  }
+
+  /** Persist only the given fields for the given list ids. */
+  const persistListChanges = async (
+    updated: TodoList[],
+    changedIds: string[],
+    fields: (keyof TodoList)[]
+  ) => {
+    if (changedIds.length === 0) return
+    const byId = new Map(updated.map((l) => [l.id, l]))
+    const updates = changedIds.map((id) => {
+      const list = byId.get(id)!
+      const patch: Record<string, unknown> = {}
+      for (const field of fields) patch[field] = list[field]
+      return supabase.from('lists').update(patch).eq('id', id)
+    })
+    const results = await Promise.all(updates)
+    const failed = results.find((r) => r.error)
+    if (failed?.error) setError(failed.error.message)
+  }
+
+  // --- Entries ---------------------------------------------------------
+
   const addEntry = async (content: string, parentId: string | null = null) => {
     if (!selectedListId) return
-    const siblingCount = entries.filter((e) => e.parent_entry_id === parentId).length
+    const siblingCount = entries.filter(
+      (e) => e.list_id === selectedListId && e.parent_entry_id === parentId
+    ).length
     const { data, error } = await supabase
       .from('entries')
       .insert({
@@ -105,44 +245,39 @@ export default function App() {
   const toggleEntry = (id: string, done: boolean) => {
     const { entries: updated, changedIds } = toggleWithCascade(entries, id, done)
     setEntries(updated)
-    persistChanges(updated, changedIds, ['done'])
+    persistEntryChanges(updated, changedIds, ['done'])
   }
 
   const editEntry = async (id: string, content: string) => {
-    const { error } = await supabase
-      .from('entries')
-      .update({ content })
-      .eq('id', id)
+    const { error } = await supabase.from('entries').update({ content }).eq('id', id)
     if (error) return setError(error.message)
     setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, content } : e)))
   }
 
   const deleteEntry = async (id: string) => {
-    // The DB cascades deletes to descendants (parent_entry_id references
-    // entries.id on delete cascade), so we only need to delete this row.
     const { error } = await supabase.from('entries').delete().eq('id', id)
     if (error) return setError(error.message)
-    setEntries((prev) => filterOutSubtree(prev, id))
+    setEntries((prev) => filterOutEntrySubtree(prev, id))
   }
 
-  const toggleCollapsed = async (id: string, collapsed: boolean) => {
-    const { error } = await supabase
-      .from('entries')
-      .update({ collapsed })
-      .eq('id', id)
+  const toggleEntryCollapsed = async (id: string, collapsed: boolean) => {
+    const { error } = await supabase.from('entries').update({ collapsed }).eq('id', id)
     if (error) return setError(error.message)
     setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, collapsed } : e)))
   }
 
   const moveEntry = (draggedId: string, overId: string, zone: DropZone) => {
     const result = moveEntryInTree(entries, draggedId, overId, zone)
-    if (!result) return // invalid move (e.g. would create a cycle)
+    if (!result) return
     setEntries(result.entries)
-    persistChanges(result.entries, result.changedIds, ['parent_entry_id', 'position', 'collapsed'])
+    persistEntryChanges(result.entries, result.changedIds, [
+      'parent_entry_id',
+      'position',
+      'collapsed',
+    ])
   }
 
-  /** Persist only the fields that changed for the given entry ids. */
-  const persistChanges = async (
+  const persistEntryChanges = async (
     updated: Entry[],
     changedIds: string[],
     fields: (keyof Entry)[]
@@ -160,7 +295,14 @@ export default function App() {
     if (failed?.error) setError(failed.error.message)
   }
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+  }
+
   const selectedList = lists.find((l) => l.id === selectedListId) ?? null
+  const selectedListEntries = selectedListId
+    ? entries.filter((e) => e.list_id === selectedListId)
+    : []
 
   if (loading) return <div className="center-message">Loading…</div>
 
@@ -178,18 +320,25 @@ export default function App() {
         onCreate={createList}
         onRename={renameList}
         onDelete={deleteList}
+        onToggleCollapsed={toggleListCollapsed}
+        onMove={moveList}
+        onSignOut={handleSignOut}
+        userEmail={session.user.email}
       />
       <main className="main-content">
         {selectedList ? (
           <ListView
             list={selectedList}
-            entries={entries}
+            entries={selectedListEntries}
+            completions={completions}
             onAddEntry={addEntry}
             onToggleEntry={toggleEntry}
             onEditEntry={editEntry}
             onDeleteEntry={deleteEntry}
-            onToggleCollapsed={toggleCollapsed}
+            onToggleCollapsedEntry={toggleEntryCollapsed}
             onMoveEntry={moveEntry}
+            onUpdateListSettings={updateListSettings}
+            onManualReset={manualReset}
           />
         ) : (
           <div className="center-message">

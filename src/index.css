@@ -59,38 +59,94 @@ button:hover {
   background: #3947c9;
 }
 
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.sign-out-btn {
+  background: none;
+  color: #999;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.sign-out-btn:hover {
+  background: #f0f0f5;
+  color: #333;
+}
+
+.signed-in-as {
+  color: #aaa;
+  font-size: 12px;
+  margin: 0 0 16px;
+  word-break: break-all;
+}
+
 .list-nav {
   list-style: none;
   padding: 0;
   margin: 0;
 }
 
-.list-nav li {
+.list-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 8px 10px;
+  gap: 4px;
+  padding: 6px 8px;
   border-radius: 6px;
-  cursor: pointer;
+  cursor: default;
+  position: relative;
 }
 
-.list-nav li:hover {
+.list-row:hover {
   background: #f0f0f5;
 }
 
-.list-nav li.active {
+.list-row.active {
   background: #e7e9fd;
   font-weight: 600;
 }
 
+.list-row.dragging {
+  opacity: 0.4;
+}
+
+.list-row.drop-nest {
+  background: #eef0ff;
+  outline: 1px solid #8f9cf7;
+}
+
+.list-row.drop-before {
+  box-shadow: inset 0 3px 0 0 #4a5cf0;
+}
+
+.list-row.drop-after {
+  box-shadow: inset 0 -3px 0 0 #4a5cf0;
+}
+
 .list-title {
   flex: 1;
+  cursor: pointer;
+  padding: 2px 0;
+  font-size: 14px;
+}
+
+.list-actions {
+  display: none;
+  gap: 2px;
+}
+
+.list-row:hover .list-actions {
+  display: flex;
 }
 
 .list-actions button {
   background: none;
   padding: 2px 4px;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .list-actions button:hover {
@@ -232,4 +288,167 @@ button:hover {
   text-align: center;
   cursor: pointer;
   z-index: 10;
+}
+
+.auth-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: #f7f7fa;
+}
+
+.auth-card {
+  background: #fff;
+  border: 1px solid #e2e2e6;
+  border-radius: 12px;
+  padding: 32px;
+  width: 320px;
+  text-align: center;
+}
+
+.auth-card h1 {
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+.auth-card p {
+  color: #666;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.auth-card input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.auth-card button {
+  width: 100%;
+}
+
+.auth-error {
+  color: #c33;
+  font-size: 13px;
+  margin-top: 10px;
+}
+
+.list-view-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.list-view-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  padding-top: 4px;
+}
+
+.ghost-btn {
+  background: none;
+  color: #555;
+  border: 1px solid #ddd;
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
+.ghost-btn:hover {
+  background: #f0f0f5;
+}
+
+.settings-panel,
+.history-panel {
+  background: #fff;
+  border: 1px solid #e2e2e6;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 12px 0 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  max-width: 700px;
+}
+
+.settings-panel label {
+  font-size: 14px;
+  color: #444;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-panel select {
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.n-days-input {
+  width: 56px;
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.history-panel {
+  display: block;
+  overflow-x: auto;
+}
+
+.history-empty {
+  color: #999;
+  font-size: 14px;
+}
+
+.history-grid-wrapper {
+  overflow-x: auto;
+}
+
+.history-grid {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.history-grid th,
+.history-grid td {
+  padding: 6px 10px;
+  text-align: center;
+  border-bottom: 1px solid #eee;
+  white-space: nowrap;
+}
+
+.history-grid .history-entry-col {
+  text-align: left;
+  font-weight: normal;
+  color: #333;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-grid th.history-entry-col {
+  color: #888;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.history-grid .history-done {
+  color: #2a9d5c;
+  font-weight: 600;
+}
+
+.history-grid .history-missed {
+  color: #ccc;
 }
